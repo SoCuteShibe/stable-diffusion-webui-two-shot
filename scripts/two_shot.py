@@ -344,13 +344,13 @@ class Script(scripts.Script):
                 try:
                     sketch_colors.append(gr.update(value=f'<div class="color-bg-item" style="background-color: black"></div>'))
                 except Exception as e:
-                    print(f'two_shot.py => sketch_colors.append() => \n"{e[:30]}..."')
+                    print(f'[error] two_shot.py => sketch_colors.append() => \n"{e[:30]}..."')
 
             for j in range(len(colors_fixed)-1):
                 try:
                     sketch_colors[j] = colors_fixed[j]
                 except Exception as e:
-                    print(f'two_shot.py => sketch_colors[j] = colors_fixed[j] => \n"{e[:30]}..."')
+                    print(f'[error] two_shot.py => sketch_colors[j] = colors_fixed[j] => \n"{e[:30]}..."')
 
             alpha_mask_visibility = gr.update(visible=True)
             alpha_mask_html = colors_fixed[-1]
