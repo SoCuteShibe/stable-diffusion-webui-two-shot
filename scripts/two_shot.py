@@ -1,21 +1,16 @@
-import base64
+from scripts.sketch_helper import get_high_freq_colors, color_quantization, create_binary_matrix_base64, create_binary_mask
+from modules.script_callbacks import CFGDenoisedParams, on_cfg_denoised
+from modules.processing import StableDiffusionProcessing
+from modules import devices, script_callbacks
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-
-import torch
-
-from scripts.sketch_helper import get_high_freq_colors, color_quantization, create_binary_matrix_base64, create_binary_mask
-import numpy as np
-import cv2
-
-from modules import devices, script_callbacks
-
 import modules.scripts as scripts
 import gradio as gr
+import numpy as np
+import base64
+import torch
+import cv2
 
-from modules.script_callbacks import CFGDenoisedParams, on_cfg_denoised
-
-from modules.processing import StableDiffusionProcessing
 
 MAX_COLORS = 12
 switch_values_symbol = '\U000021C5' # ⇅
@@ -23,7 +18,7 @@ switch_values_symbol = '\U000021C5' # ⇅
 
 class ToolButton(gr.Button, gr.components.FormComponent):
     """Small button with single emoji as text, fits inside gradio forms"""
-
+    
     def __init__(self, **kwargs):
         super().__init__(variant="tool", **kwargs)
 
@@ -35,14 +30,10 @@ class ToolButton(gr.Button, gr.components.FormComponent):
 from abc import ABC, abstractmethod
 
 
-
-
 class Filter(ABC):
-
     @abstractmethod
     def create_tensor(self):
         pass
-
 
 
 @dataclass
@@ -59,7 +50,6 @@ class Position:
     ex: float
 
 
-
 class RectFilter(Filter):
     def __init__(self, division: Division, position: Position, weight: float):
         self.division = division
@@ -67,7 +57,6 @@ class RectFilter(Filter):
         self.weight = weight
 
     def create_tensor(self, num_channels: int, height_b: int, width_b: int) -> torch.Tensor:
-
         x = torch.zeros(num_channels, height_b, width_b).to(devices.device)
 
         division_height = height_b / self.division.y
@@ -93,8 +82,6 @@ class MaskFilter:
         self.tensor_mask = torch.tensor(self.mask).to(devices.device)
 
     def create_tensor(self, num_channels: int, height_b: int, width_b: int) -> torch.Tensor:
-
-
         # x = torch.zeros(num_channels, height_b, width_b).to(devices.device)
         # mask = torch.tensor(self.mask).to(devices.device)
         # downsample mask to x size
@@ -121,7 +108,6 @@ class PastePromptTextboxTracker:
         self.scripts.append(script)
 
     def on_after_component_callback(self, component, **_kwargs):
-
         if not self.scripts:
             return
         if type(component) is gr.State:
@@ -153,7 +139,7 @@ class Script(scripts.Script):
         self.ui_root = None
         self.num_batches: int = 0
         self.end_at_step: int = 20
-        self.filters: List[Filter] = []
+        self.filters: List[RectFilter] = []
         self.debug: bool = False
         self.selected_twoshot_tab = 0
         self.ndmasks = []
@@ -162,7 +148,6 @@ class Script(scripts.Script):
         prompt_textbox_tracker.set_script(self)
         self.target_paste_prompt = None
 
-
     def title(self):
         return "Latent Couple extension"
 
@@ -170,7 +155,6 @@ class Script(scripts.Script):
         return scripts.AlwaysVisible
 
     def create_rect_filters_from_ui_params(self, raw_divisions: str, raw_positions: str, raw_weights: str):
-
         divisions = []
         for division in raw_divisions.split(','):
             y, x = division.split(':')
@@ -199,7 +183,6 @@ class Script(scripts.Script):
         return [RectFilter(division, position, weight) for division, position, weight in zip(divisions, positions, weights)]
 
     def create_mask_filters_from_ui_params(self, raw_divisions: str, raw_positions: str, raw_weights: str):
-
         divisions = []
         for division in raw_divisions.split(','):
             y, x = division.split(':')
@@ -225,7 +208,7 @@ class Script(scripts.Script):
 
         # todo: assert len
 
-        return [Filter(division, position, weight) for division, position, weight in zip(divisions, positions, weights)]
+        return [RectFilter(division, position, weight) for division, position, weight in zip(divisions, positions, weights)]
 
     def do_visualize(self, raw_divisions: str, raw_positions: str, raw_weights: str):
 
@@ -310,14 +293,13 @@ class Script(scripts.Script):
                 colors_fixed.append(gr.update(
                     value=f'<div style="display:flex;justify-content:center;max-height: 94px;"><img width="20%" style="object-fit: contain;flex-grow:1;margin-right: 1em;" src="data:image/png;base64,{binary_matrix}" /><div class="color-bg-item" style="background-color: rgb({r},{g},{b});width:10%;height:auto;"></div></div>'))
 
-
-
             visibilities = []
             sketch_colors = []
 
             for sketch_color_idx in range(MAX_COLORS):
                 visibilities.append(gr.update(visible=False))
                 sketch_colors.append(gr.update(value=f'<div class="color-bg-item" style="background-color: black"></div>'))
+            print(colors_fixed)
             for j in range(len(colors_fixed)-1):
                 visibilities[j] = gr.update(visible=True)
                 sketch_colors[j] = colors_fixed[j]
@@ -352,31 +334,32 @@ class Script(scripts.Script):
                     final_list_idx = 0
                 # get shape of current mask
                 height_b, width_b = final_filter_list[final_list_idx].mask.shape
-                current_mask = torch.nn.functional.interpolate(final_filter_list[final_list_idx].tensor_mask.unsqueeze(0).unsqueeze(0),
-                                                       size=(int(height_b/8), int(width_b/8)), mode='nearest-exact').squeeze(0).squeeze(0).cpu().numpy()
+                current_mask = torch.nn.functional.interpolate(final_filter_list[final_list_idx].tensor_mask.unsqueeze(0).unsqueeze(0),size=(int(height_b/8), int(width_b/8)), mode='nearest-exact').squeeze(0).squeeze(0).cpu().numpy()
                 adjusted_mask = current_mask * 255
                 _, adjusted_mask_arr = cv2.imencode('.png', adjusted_mask)
-
                 adjusted_mask_b64 = base64.b64encode(adjusted_mask_arr.tobytes()).decode('ascii')
-                colors_fixed.append(gr.update(
-                    value=f'<div style="display:flex;justify-content:center;max-height: 94px;"><img width="20%" style="object-fit: contain;flex-grow:1;margin-right: 1em;" src="data:image/png;base64,{adjusted_mask_b64}" /><div class="color-bg-item" style="background-color: rgb({r},{g},{b});width:10%;height:auto;"></div></div>'))
+                colors_fixed.append(gr.update(value=f'<div style="display:flex;justify-content:center;max-height: 94px;"><img width="20%" style="object-fit: contain;flex-grow:1;margin-right: 1em;" src="data:image/png;base64,{adjusted_mask_b64}" /><div class="color-bg-item" style="background-color: rgb({r},{g},{b});width:10%;height:auto;"></div></div>'))
+            
             for sketch_color_idx in range(MAX_COLORS):
+                try:
+                    sketch_colors.append(gr.update(value=f'<div class="color-bg-item" style="background-color: black"></div>'))
+                except Exception as e:
+                    print(f'two_shot.py => sketch_colors.append() => \n"{e[:30]}..."')
 
-                sketch_colors.append(
-                    gr.update(value=f'<div class="color-bg-item" style="background-color: black"></div>'))
             for j in range(len(colors_fixed)-1):
+                try:
+                    sketch_colors[j] = colors_fixed[j]
+                except Exception as e:
+                    print(f'two_shot.py => sketch_colors[j] = colors_fixed[j] => \n"{e[:30]}..."')
 
-                sketch_colors[j] = colors_fixed[j]
             alpha_mask_visibility = gr.update(visible=True)
             alpha_mask_html = colors_fixed[-1]
             final_prompt_update = gr.update(value='\nAND '.join([general_prompt_str, *cur_prompts[:len(colors_fixed)-1]]))
             return [final_prompt_update, alpha_mask_visibility, alpha_mask_html, *sketch_colors]
 
-
-
         cur_weight_sliders = []
 
-        with gr.Group() as group_two_shot_root:
+        with gr.Group(elem_id="twoshotui") as group_two_shot_root:
             binary_matrixes = gr.State([])
             with gr.Accordion("Latent Couple", open=False):
                 enabled = gr.Checkbox(value=False, label="Enabled")
@@ -446,12 +429,9 @@ class Script(scripts.Script):
                         button_update.click(fn=paste_prompt, inputs=source_prompts,
                                             outputs=self.target_paste_prompt)
 
-
-
                         with gr.Column():
                             canvas_width = gr.Slider(label="Canvas Width", minimum=256, maximum=1024, value=512, step=64)
                             canvas_height = gr.Slider(label="Canvas Height", minimum=256, maximum=1024, value=512, step=64)
-
 
                             canvas_swap_res = ToolButton(value=switch_values_symbol)
                             canvas_swap_res.click(lambda w, h: (h, w), inputs=[canvas_width, canvas_height],
@@ -502,7 +482,6 @@ class Script(scripts.Script):
         return process_script_params
 
     def denoised_callback(self, params: CFGDenoisedParams):
-
         if self.enabled and params.sampling_step < self.end_at_step:
 
             x = params.x
@@ -553,7 +532,6 @@ class Script(scripts.Script):
                 uncond_off += 1
 
     def process(self, p: StableDiffusionProcessing, *args, **kwargs):
-
         enabled, raw_divisions, raw_positions, raw_weights, raw_end_at_step, alpha_blend, *cur_weight_sliders = args
 
         self.enabled = enabled
@@ -572,11 +550,6 @@ class Script(scripts.Script):
 
         self.end_at_step = raw_end_at_step
 
-        # TODO: handle different cases for generation info: 'mask' and 'rect'
-        # if self.end_at_step != 0:
-        #     p.extra_generation_params["Latent Couple"] = f"divisions={raw_divisions} positions={raw_positions} weights={raw_weights} end at step={raw_end_at_step}"
-
-
         if self.debug:
             print(f"### Latent couple ###")
             print(f"process num_batches={self.num_batches} end_at_step={self.end_at_step}")
@@ -584,7 +557,6 @@ class Script(scripts.Script):
         if not hasattr(self, 'callbacks_added'):
             on_cfg_denoised(self.denoised_callback)
             self.callbacks_added = True
-
         return
 
     def postprocess(self, *args):

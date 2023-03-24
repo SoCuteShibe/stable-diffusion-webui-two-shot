@@ -23,7 +23,7 @@
     position: absolute;
 }
 
-.output-html{
+#twoshotui > .output-html{
     display: flex;
     justify-content: center;
     align-items: center;
